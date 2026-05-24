@@ -254,6 +254,9 @@ work_status = st.sidebar.selectbox(
     [
         "既に就労中",
         "育休復職予定",
+        "出産・育児（下の子育児など）",
+        "介護・看護",
+        "就学",
         "求職中"
     ]
 
@@ -567,29 +570,66 @@ if nursery != "指定なし":
         f"実データ通過率: {pass_ratio_actual:.1%}"
     )
 
+
 # =====================================
 # histogram
 # =====================================
 
 st.subheader("📉 スコア分布を見る")
 
+st.caption(
+    "※ 偏差値50が横浜保活の平均的な目安です"
+)
+
+# =====================================
+# 偏差値変換
+# =====================================
+
+score_mean = np.mean(scores)
+score_std = np.std(scores)
+
+hensachi_scores = (
+
+    (scores - score_mean)
+    / score_std
+
+) * 10 + 50
+
+user_hensachi = (
+
+    (user_score - score_mean)
+    / score_std
+
+) * 10 + 50
+
+threshold_hensachi = (
+
+    (threshold - score_mean)
+    / score_std
+
+) * 10 + 50
+
 hist_df = pd.DataFrame({
-    "score": scores
+    "偏差値": hensachi_scores
 })
 
 fig = px.histogram(
 
     hist_df,
 
-    x="score",
+    x="偏差値",
 
-    nbins=40
+    nbins=25
 
 )
 
+# =====================================
+# user line
+# =====================================
+
 fig.add_vline(
 
-    x=user_score,
+    x=user_hensachi,
 
     line_color="red",
 
@@ -597,9 +637,13 @@ fig.add_vline(
 
 )
 
+# =====================================
+# threshold line
+# =====================================
+
 fig.add_vline(
 
-    x=threshold,
+    x=threshold_hensachi,
 
     line_color="green",
 
@@ -607,9 +651,36 @@ fig.add_vline(
 
 )
 
+# =====================================
+# layout
+# =====================================
+
+fig.update_layout(
+
+    xaxis_title="偏差値",
+    yaxis_title="人数"
+
+)
+
+# =====================================
+# mobile friendly
+# =====================================
+
 st.plotly_chart(
+
     fig,
-    use_container_width=True
+
+    use_container_width=True,
+
+    config={
+
+        "displayModeBar": False,
+        "scrollZoom": False,
+        "doubleClick": False,
+        "staticPlot": True
+
+    }
+
 )
 
 # =====================================
@@ -631,15 +702,17 @@ if nursery != "指定なし":
     if len(monthly_plot) > 0:
 
         # =============================
-        # sort
+        # 月ソート
         # =============================
 
-        monthly_plot = monthly_plot.sort_values(
-            "月"
-        )
+        if "月" in monthly_plot.columns:
+
+            monthly_plot = monthly_plot.sort_values(
+                "月"
+            )
 
         # =============================
-        # columns check
+        # 使用可能列
         # =============================
 
         target_cols = []
@@ -655,6 +728,10 @@ if nursery != "指定なし":
             if c in monthly_plot.columns:
 
                 target_cols.append(c)
+
+        # =============================
+        # plot
+        # =============================
 
         if len(target_cols) > 0:
 
@@ -681,18 +758,33 @@ if nursery != "指定なし":
 
             )
 
+            trend_fig.update_layout(
+
+                xaxis_title="月",
+                yaxis_title="人数"
+
+            )
+
             st.plotly_chart(
 
                 trend_fig,
 
-                use_container_width=True
+                use_container_width=True,
+
+                config={
+
+                    "displayModeBar": False,
+                    "scrollZoom": False,
+                    "doubleClick": False
+
+                }
 
             )
 
         else:
 
-            st.warning(
-                "月次列が見つかりません"
+            st.info(
+                "月次列がありません"
             )
 
     else:
@@ -703,6 +795,8 @@ if nursery != "指定なし":
 
 # =====================================
 # easy ranking
+# =====================================
+
 # =====================================
 
 st.subheader("🟢 比較的入りやすい園")

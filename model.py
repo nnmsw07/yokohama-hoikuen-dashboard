@@ -2,9 +2,30 @@ import numpy as np
 
 
 # =====================================
-# ユーザースコア計算
+# 難易度ラベル
 # =====================================
 
+def difficulty_label(score):
+
+    if score >= 4.8:
+        return "🔥 超激戦"
+
+    elif score >= 4.2:
+        return "🟠 激戦"
+
+    elif score >= 3.5:
+        return "🟡 やや激戦"
+
+    elif score >= 2.5:
+        return "🟢 比較的入りやすい"
+
+    else:
+        return "🔵 入りやすい"
+
+
+# =====================================
+# ユーザースコア
+# =====================================
 
 
 def calc_user_score(
@@ -16,510 +37,491 @@ def calc_user_score(
     single_parent,
     ninkaigai,
 
-    nursery_worker=False,
-    grandparents_nearby=False,
-    saturday_work=False,
-    night_shift=False,
-    six_day_work=False,
-    self_employed=False
+    nursery_worker,
+    grandparents_nearby,
+    saturday_work,
+    night_shift,
+    six_day_work,
+    self_employed
 
 ):
 
     # =================================
-    # 横浜市ランク壁再現
+    # 横浜保活ランク近似
     #
-    # A/B/C... をまず決定し、
-    # 調整指数は ±10未満へ制限。
-    #
-    # これにより、
-    # BランクがAランクを
-    # 超えにくくする。
+    # ランク壁を強くするため、
+    # rank_score * 100
+    # + adjustment
+    # で構成
     # =================================
 
-    # =================================
-    # 就労ランク
-    # =================================
+    rank_map = {
 
-    # =================================
-    # 実データ分布へキャリブレーション
-    #
-    # Aランク:
-    # 48〜58
-    #
-    # Bランク:
-    # 40〜48
-    #
-    # C以下:
-    # 30〜40
-    # =================================
-
-    rank_base = {
-
-        "月160時間以上": 52,
-        "月140〜160時間": 48,
-        "月120〜140時間": 44,
-        "月100〜120時間": 40,
-        "月64〜100時間": 36,
-        "月64時間未満": 30
+        "月160時間以上": 5,
+        "月140〜160時間": 4,
+        "月120〜140時間": 3,
+        "月100〜120時間": 2,
+        "月64〜100時間": 1,
+        "月64時間未満": 0
 
     }
 
-    score = rank_base.get(
+    rank_score = rank_map.get(
         employment_type,
-        50
+        0
     )
 
     # =================================
-    # 求職中補正
+    # 求職中は大幅弱化
     # =================================
 
     if work_status == "求職中":
 
-        score -= 8
-
-    elif work_status == "育休復職予定":
-
-        score += 0
+        rank_score = min(
+            rank_score,
+            1
+        )
 
     # =================================
-    # adjustment
+    # 出産・育児
     # =================================
 
-    adjustment = 0
+    elif work_status == "出産・育児（下の子育児など）":
 
+        rank_score = max(
+            rank_score - 2,
+            1
+        )
+
+    # =================================
+    # 就学・介護
+    # =================================
+
+    elif work_status in [
+
+        "介護・看護",
+        "就学"
+
+    ]:
+
+        rank_score = max(
+            rank_score - 1,
+            1
+        )
+
+    # =================================
+    # 調整指数
+    # =================================
+
+    adjust = 0
+
+    # 兄弟加点
     if has_sibling:
-        adjustment += 3
+        adjust += 7
 
+    # ひとり親
     if single_parent:
-        adjustment += 4
+        adjust += 8
 
+    # 認可外
     if ninkaigai:
-        adjustment += 3
+        adjust += 4
 
+    # 保育士
     if nursery_worker:
-        adjustment += 2
+        adjust += 5
 
+    # 土曜勤務
     if saturday_work:
-        adjustment += 1
+        adjust += 1
 
+    # 夜勤
     if night_shift:
-        adjustment += 2
+        adjust += 2
 
+    # 週6
     if six_day_work:
-        adjustment += 2
+        adjust += 2
 
-    if self_employed:
-        adjustment += 1
-
-    # =================================
-    # 祖父母近居は軽微減点
-    # =================================
-
+    # 祖父母近居
     if grandparents_nearby:
-        adjustment -= 2
+        adjust -= 2
 
-    # =================================
-    # 調整指数制限
-    # =================================
+    # 自営業
+    if self_employed:
+        adjust -= 1
 
-    adjustment = max(
-        min(adjustment, 8),
-        -8
+    # clamp
+    adjust = max(
+        min(adjust, 15),
+        -15
     )
 
-    score += adjustment
+    
+    # =================================
+    # 年収補正
+    #
+    # 横浜では低年収が
+    # やや有利傾向
+    # =================================
 
-    return score
+    income_bias = np.random.choice(
 
+        [
 
+            -3,
+            -1,
+            0,
+            1,
+            2
 
+        ],
 
-# =====================================
-# 難易度ラベル
-# =====================================
+        p=[
 
-def difficulty_label(score):
+            0.10,
+            0.20,
+            0.40,
+            0.20,
+            0.10
 
-    if score >= 4:
-        return "🔥 超激戦"
+        ]
 
-    elif score >= 3:
-        return "🔴 激戦"
-
-    elif score >= 2:
-        return "⚠️ やや激戦"
-
-    else:
-        return "🟢 比較的入りやすい"
-
-
-# =====================================
-# 年収補正
-# =====================================
-
-def income_adjustment(income):
-
-    table = {
-
-        "〜400万": -1.5,
-        "400〜600万": -0.5,
-        "600〜800万": 0,
-        "800〜1000万": 0.5,
-        "1000万〜": 1.5
-
-    }
-
-    return table.get(
-        income,
-        0
     )
+
+    # =================================
+    # ランダムノイズ
+    #
+    # 実際の横浜保活では
+    # 園希望順
+    # 年度差
+    # 転園
+    # 地域偏差
+    # 兄弟構成
+    # などで分散するため
+    # 完全ランク制にはならない
+    # =================================
+
+    noise = np.random.normal(
+        0,
+        6
+    )
+
+    # =================================
+    # 最終スコア
+    #
+    # rank壁を維持しつつ
+    # 正規分布へ近づける
+    # =================================
+
+    score = (
+
+        rank_score * 10
+
+        + adjust
+
+        + income_bias
+
+        + noise
+
+    )
+
+    return round(score, 1)
+
+
 
 
 # =====================================
 # 母集団シミュレーション
 # =====================================
 
+
 def simulate_population(
     age,
-    ward=None,
-    n=10000
+    ward
 ):
 
     # =================================
-    # 現実寄りキャリブレーション
+    # 横浜保活の人口構成を
+    # モンテカルロ近似
+    #
+    # 実際の応募者属性割合を
+    # ざっくり反映
     # =================================
 
-    params = {
-
-        "0歳": (45, 4),
-        "1歳": (48, 4),
-        "2歳": (46, 4)
-
-    }
-
-    mean, std = params[age]
-
-    # =================================
-    # 区別統計
-    # =================================
-
-    ward_stats = {
-
-        "青葉区": {
-            "high_income": 0.42,
-            "grandparents": 0.20,
-            "dual_fulltime": 0.68
-        },
-
-        "都筑区": {
-            "high_income": 0.35,
-            "grandparents": 0.24,
-            "dual_fulltime": 0.70
-        },
-
-        "港北区": {
-            "high_income": 0.35,
-            "grandparents": 0.22,
-            "dual_fulltime": 0.72
-        },
-
-        "西区": {
-            "high_income": 0.38,
-            "grandparents": 0.18,
-            "dual_fulltime": 0.71
-        },
-
-        "中区": {
-            "high_income": 0.30,
-            "grandparents": 0.28,
-            "dual_fulltime": 0.64
-        },
-
-        "神奈川区": {
-            "high_income": 0.28,
-            "grandparents": 0.30,
-            "dual_fulltime": 0.66
-        },
-
-        "戸塚区": {
-            "high_income": 0.25,
-            "grandparents": 0.35,
-            "dual_fulltime": 0.62
-        },
-
-        "港南区": {
-            "high_income": 0.24,
-            "grandparents": 0.36,
-            "dual_fulltime": 0.61
-        },
-
-        "磯子区": {
-            "high_income": 0.22,
-            "grandparents": 0.38,
-            "dual_fulltime": 0.58
-        },
-
-        "鶴見区": {
-            "high_income": 0.18,
-            "grandparents": 0.38,
-            "dual_fulltime": 0.58
-        },
-
-        "保土ケ谷区": {
-            "high_income": 0.22,
-            "grandparents": 0.36,
-            "dual_fulltime": 0.60
-        },
-
-        "旭区": {
-            "high_income": 0.17,
-            "grandparents": 0.44,
-            "dual_fulltime": 0.54
-        },
-
-        "瀬谷区": {
-            "high_income": 0.15,
-            "grandparents": 0.46,
-            "dual_fulltime": 0.52
-        },
-
-        "泉区": {
-            "high_income": 0.16,
-            "grandparents": 0.45,
-            "dual_fulltime": 0.53
-        },
-
-        "栄区": {
-            "high_income": 0.18,
-            "grandparents": 0.43,
-            "dual_fulltime": 0.55
-        },
-
-        "金沢区": {
-            "high_income": 0.20,
-            "grandparents": 0.40,
-            "dual_fulltime": 0.57
-        },
-
-        "緑区": {
-            "high_income": 0.27,
-            "grandparents": 0.30,
-            "dual_fulltime": 0.64
-        },
-
-        "南区": {
-            "high_income": 0.14,
-            "grandparents": 0.40,
-            "dual_fulltime": 0.50
-        }
-
-    }
-
-    default_stats = {
-
-        "high_income": 0.25,
-        "grandparents": 0.35,
-        "dual_fulltime": 0.60
-
-    }
-
-    stats = ward_stats.get(
-        ward,
-        default_stats
-    )
+    np.random.seed(42)
 
     scores = []
 
-    for _ in range(n):
+    # =================================
+    # 区補正
+    # =================================
 
-        s = np.random.normal(
-            mean,
-            std
+    ward_bonus = {
+
+        "港北区": 2,
+        "中区": 2,
+        "神奈川区": 1.5,
+        "青葉区": 1.5,
+        "都筑区": 1.5,
+
+        "旭区": -1,
+        "泉区": -1,
+        "瀬谷区": -1
+
+    }
+
+    # =================================
+    # 年齢補正
+    # =================================
+
+    age_bonus = {
+
+        "0歳": -2,
+        "1歳": 2,
+        "2歳": 1,
+        "3歳": -1,
+        "4歳": -2,
+        "5歳": -3
+
+    }
+
+    for _ in range(10000):
+
+        # =============================
+        # 就労状況
+        # =============================
+
+        work_status = np.random.choice(
+
+            [
+
+                "既に就労中",
+                "育休復職予定",
+                "出産・育児（下の子育児など）",
+                "介護・看護",
+                "就学",
+                "求職中"
+
+            ],
+
+            p=[
+
+                0.63,
+                0.20,
+                0.08,
+                0.03,
+                0.02,
+                0.04
+
+            ]
+
         )
 
         # =============================
-        # 共働き
+        # 就労時間
         # =============================
 
-        if np.random.rand() < stats["dual_fulltime"]:
-            s += 1.5
+        employment_type = np.random.choice(
+
+            [
+
+                "月160時間以上",
+                "月140〜160時間",
+                "月120〜140時間",
+                "月100〜120時間",
+                "月64〜100時間",
+                "月64時間未満"
+
+            ],
+
+            p=[
+
+                0.55,
+                0.25,
+                0.10,
+                0.06,
+                0.03,
+                0.01
+
+            ]
+
+        )
 
         # =============================
-        # 兄弟加点
+        # 属性
         # =============================
 
-        if np.random.rand() < 0.30:
-            s += 2
+        has_sibling = (
+            np.random.rand() < 0.15
+        )
+
+        single_parent = (
+            np.random.rand() < 0.05
+        )
+
+        ninkaigai = (
+            np.random.rand() < 0.08
+        )
+
+        nursery_worker = (
+            np.random.rand() < 0.02
+        )
+
+        grandparents_nearby = (
+            np.random.rand() < 0.30
+        )
+
+        saturday_work = (
+            np.random.rand() < 0.15
+        )
+
+        night_shift = (
+            np.random.rand() < 0.08
+        )
+
+        six_day_work = (
+            np.random.rand() < 0.05
+        )
+
+        self_employed = (
+            np.random.rand() < 0.07
+        )
 
         # =============================
-        # ひとり親
+        # score
         # =============================
 
-        if np.random.rand() < 0.10:
-            s += 4
+        score = calc_user_score(
+
+            work_status,
+            employment_type,
+
+            has_sibling,
+            single_parent,
+            ninkaigai,
+
+            nursery_worker,
+            grandparents_nearby,
+            saturday_work,
+            night_shift,
+            six_day_work,
+            self_employed
+
+        )
 
         # =============================
-        # 認可外
+        # area adjustment
         # =============================
 
-        if np.random.rand() < 0.15:
-            s += 1
+        score += ward_bonus.get(
+            ward,
+            0
+        )
 
-        # =============================
-        # 保育士
-        # =============================
+        score += age_bonus.get(
+            age,
+            0
+        )
 
-        if np.random.rand() < 0.03:
-            s += 2
+        scores.append(score)
 
-        # =============================
-        # 祖父母近居
-        # =============================
+    scores = np.array(scores)
 
-        if np.random.rand() < stats["grandparents"]:
-            s -= 1
+    scores = np.clip(
+        scores,
+        10,
+        90
+    )
 
-        # =============================
-        # 土曜勤務
-        # =============================
+    return scores
 
-        if np.random.rand() < 0.25:
-            s += 0.5
-
-        # =============================
-        # 夜勤
-        # =============================
-
-        if np.random.rand() < 0.08:
-            s += 1
-
-        # =============================
-        # 週6
-        # =============================
-
-        if np.random.rand() < 0.12:
-            s += 1
-
-        # =============================
-        # 自営業
-        # =============================
-
-        if np.random.rand() < 0.10:
-            s -= 0.5
-
-        # =============================
-        # 年収補正
-        # =============================
-
-        r = np.random.rand()
-
-        high_income_bias = stats[
-            "high_income"
-        ]
-
-        if r < high_income_bias:
-            s -= 1
-
-        elif r < (
-            high_income_bias + 0.20
-        ):
-            s -= 0.5
-
-        elif r < 0.75:
-            s += 0
-
-        elif r < 0.92:
-            s += 0.5
-
-        else:
-            s += 1.5
-
-        scores.append(s)
-
-    return np.array(scores)
 
 
 # =====================================
-# 通過確率
+# 通過率推定
 # =====================================
 
 def get_pass_probability(
 
     scores,
     user_score,
-
-    accepted=100,
-    waiting=100,
-
-    income="600〜800万"
+    accepted,
+    waiting,
+    income
 
 ):
 
     # =================================
-    # 通過率
+    # pass ratio
     # =================================
 
-    # =================================
-    # 横浜保活では
-    # 1人が複数園申し込むため、
-    # 待機人数は重複カウントされる
-    # =================================
-
-    effective_waiting = (
-        waiting * 0.35
+    pass_ratio = accepted / max(
+        waiting,
+        1
     )
 
-    pass_ratio = accepted / (
-        accepted
-        + effective_waiting
-        + 1
-    )
-
-    pass_ratio = max(
-        0.01,
-        min(0.99, pass_ratio)
+    pass_ratio = min(
+        max(pass_ratio, 0.01),
+        0.99
     )
 
     # =================================
-    # ボーダー
+    # threshold
     # =================================
 
     threshold = np.percentile(
 
         scores,
 
-        100 * (1 - pass_ratio)
+        (1 - pass_ratio) * 100
 
+    )
+
+    # =================================
+    # probability
+    # =================================
+
+    pass_prob = np.mean(
+        scores <= user_score
     )
 
     # =================================
     # 年収補正
+    # 横浜保活では影響小
     # =================================
 
-    threshold += income_adjustment(
-        income
+    income_adjust = {
+
+        "〜400万": 1.02,
+        "400〜600万": 1.01,
+        "600〜800万": 1.00,
+        "800〜1000万": 0.99,
+        "1000万〜": 0.98
+
+    }
+
+    pass_prob *= income_adjust.get(
+        income,
+        1.0
     )
 
     # =================================
-    # 疑似確率
+    # clamp
     # =================================
 
-    diff = (
-        user_score
-        - threshold
-    )
-
-    prob = 1 / (
-        1 + np.exp(-diff / 3)
-    )
-
-    prob = max(
-        0,
-        min(1, prob)
+    pass_prob = min(
+        max(pass_prob, 0.01),
+        0.99
     )
 
     return (
-        threshold,
-        prob,
-        pass_ratio
+
+        round(threshold, 1),
+
+        round(pass_prob, 4),
+
+        round(pass_ratio, 4)
+
     )
+
