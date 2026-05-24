@@ -2,9 +2,7 @@ streamlit
 pandas
 numpy
 plotly
-openpyxl
-firebase-admin
-geopy
 folium
 streamlit-folium
-requests
+openpyxl
+

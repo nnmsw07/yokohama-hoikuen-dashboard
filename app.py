@@ -20,8 +20,56 @@ from model import (
 # =====================================
 
 st.set_page_config(
-    page_title="横浜保活ダッシュボード",
+    page_title="横浜保活診断",
     layout="wide"
+)
+
+# =====================================
+# Google Analytics
+# =====================================
+
+st.components.v1.html(
+    """
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-R5KBMRYVBE"></script>
+
+    <script>
+      window.dataLayer = window.dataLayer || [];
+
+      function gtag(){
+          dataLayer.push(arguments);
+      }
+
+      gtag('js', new Date());
+
+      gtag('config', 'G-R5KBMRYVBE');
+    </script>
+    """,
+    height=0,
+)
+
+# =====================================
+# Google Analytics
+# =====================================
+
+st.components.v1.html(
+    """
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-R5KBMRYVBE"></script>
+
+    <script>
+      window.dataLayer = window.dataLayer || [];
+
+      function gtag(){
+          dataLayer.push(arguments);
+      }
+
+      gtag('js', new Date());
+
+      gtag('config', 'G-R5KBMRYVBE');
+    </script>
+    """,
+    height=0,
 )
 
 # =====================================
@@ -646,6 +694,10 @@ if nursery != "指定なし":
 # =====================================
 
 st.subheader("🟢 比較的入りやすい園")
+
+st.caption(
+    "※ 令和6年度〜令和8年度の月次データ平均をもとに算出"
+)
 
 st.caption(
     "※ 令和6年度〜令和8年度の月次データ平均をもとに算出"
