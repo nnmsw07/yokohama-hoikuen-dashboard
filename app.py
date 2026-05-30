@@ -182,7 +182,8 @@ user_score = calc_user_score(
     saturday_work,
     night_shift,
     six_day_work,
-    self_employed
+    self_employed,
+    income
 )
 
 ward_row = ward_df[
@@ -285,25 +286,150 @@ st.info(target_text)
 
 st.markdown("### 📊 診断結果")
 
-c1, c2, c3 = st.columns(3)
+st.markdown(f"""
+<div style="
+display:flex;
+gap:8px;
+margin-bottom:12px;
+">
 
-with c1:
-    st.metric(
-        "あなたの偏差値",
-        f"{user_hensachi:.1f}"
-    )
+<div style="
+flex:1;
+background:#0f172a;
+padding:8px 4px;
+border-radius:10px;
+text-align:center;
+">
+<div style="
+font-size:20px;
+font-weight:700;
+color:white;
+line-height:1.1;
+">
+{user_hensachi:.1f}
+</div>
+<div style="
+font-size:11px;
+color:#94a3b8;
+margin-top:2px;
+">
+あなたの偏差値
+</div>
+</div>
 
-with c2:
-    st.metric(
-        "推定必要偏差値",
-        f"{threshold_hensachi:.1f}"
-    )
+<div style="
+flex:1;
+background:#0f172a;
+padding:8px 4px;
+border-radius:10px;
+text-align:center;
+">
+<div style="
+font-size:20px;
+font-weight:700;
+color:white;
+line-height:1.1;
+">
+{threshold_hensachi:.1f}
+</div>
+<div style="
+font-size:11px;
+color:#94a3b8;
+margin-top:2px;
+">
+推定必要偏差値
+</div>
+</div>
 
-with c3:
-    st.metric(
-        "推定通過確率",
-        f"{pass_prob*100:.1f}%"
-    )
+<div style="
+flex:1;
+background:#0f172a;
+padding:8px 4px;
+border-radius:10px;
+text-align:center;
+">
+<div style="
+font-size:20px;
+font-weight:700;
+color:white;
+line-height:1.1;
+">
+{pass_prob*100:.0f}%
+</div>
+<div style="
+font-size:11px;
+color:#94a3b8;
+margin-top:2px;
+">
+推定通過率
+</div>
+</div>
+
+</div>
+""", unsafe_allow_html=True)
+
+# =====================================
+# admission timing
+# =====================================
+
+timing_rates = {}
+
+if nursery != "指定なし":
+
+    timing_df = monthly_df[
+        (monthly_df["園名"] == nursery)
+        &
+        (monthly_df["年齢"] == age)
+    ].copy()
+
+    if len(timing_df) > 0:
+
+        def get_month(v):
+
+            try:
+                return int(str(v).split(".")[1])
+            except:
+                return None
+
+        timing_df["_month"] = (
+            timing_df["月"].apply(get_month)
+        )
+
+        timing_map = {
+            "🌸4月": [4],
+            "🌱5-6月": [5, 6],
+            "☀️7-9月": [7, 8, 9],
+            "🍂10-12月": [10, 11, 12],
+            "❄️1-3月": [1, 2, 3],
+        }
+
+        for label, months in timing_map.items():
+
+            tmp = timing_df[
+                timing_df["_month"].isin(months)
+            ]
+
+            if len(tmp) == 0:
+                continue
+
+            accepted_sum = (
+                tmp["受入可能数"]
+                .fillna(0)
+                .sum()
+            )
+
+            waiting_sum = (
+                tmp["待機人数"]
+                .fillna(0)
+                .sum()
+            )
+
+            season_base_rate = accepted_sum / max(
+                accepted_sum + waiting_sum,
+                1
+            )
+
+            timing_rates[label] = season_base_rate
 
 # =====================================
 # labels
@@ -320,8 +446,85 @@ if nursery != "指定なし":
     st.write(f"園難易度: {nursery_score:.2f}")
     st.write(f"実データ通過率: {pass_ratio_actual:.1%}")
 
+
+
+if len(timing_rates) > 0:
+
+    st.markdown("### 🗓 入園時期別の募集傾向")
+
+    def rate_label(rate):
+
+        if rate >= 0.6:
+            return "🟢 募集が多い"
+
+        elif rate >= 0.3:
+            return "🟡 やや多い"
+
+        elif rate >= 0.15:
+            return "🟠 普通"
+
+        elif rate >= 0.05:
+            return "🔴 少ない"
+
+        else:
+            return "⚫ ほぼなし"
+
+    items = list(timing_rates.items())
+
+    for i in range(0, len(items), 2):
+
+        cols = st.columns(2)
+
+        for j in range(2):
+
+            if i + j >= len(items):
+                continue
+
+            label, rate = items[i + j]
+
+            with cols[j]:
+
+                st.markdown(
+                    f"""
+<div style="
+background:#0f172a;
+padding:12px;
+border-radius:10px;
+text-align:center;
+margin-bottom:10px;
+">
+<div style="
+font-size:16px;
+font-weight:700;
+color:white;
+margin-bottom:6px;
+">
+{label}
+</div>
+
+<div style="
+font-size:14px;
+color:#cbd5e1;
+margin-bottom:6px;
+">
+{rate_label(rate)}
+</div>
+
+<div style="
+font-size:22px;
+font-weight:700;
+color:white;
+">
+{rate:.0%}
+</div>
+</div>
+""",
+                    unsafe_allow_html=True
+                )
+
 # =====================================
 # histogram
+
 # =====================================
 
 st.subheader("📉 スコア分布")
@@ -386,11 +589,101 @@ with st.expander("📈 月次推移を見る"):
             (monthly_df["年齢"] == age)
         ].copy()
 
+        period = st.selectbox(
+            "表示期間",
+            [
+                "直近12ヶ月",
+                "令和8年度",
+                "令和7年度",
+                "令和6年度",
+                "全期間"
+            ],
+            key="period_select"
+        )
+
+        def parse_reiwa_month(x):
+
+            x = str(x)
+
+            parts = x.split(".")
+
+            try:
+                year = int(parts[0].replace("R", ""))
+
+                month = int(parts[1])
+
+                return year, month
+
+            except:
+                return None, None
+
+        ym = monthly_plot["月"].apply(parse_reiwa_month)
+
+        monthly_plot["_year"] = ym.apply(lambda x: x[0])
+        monthly_plot["_month"] = ym.apply(lambda x: x[1])
+
+        if period == "直近12ヶ月":
+            monthly_plot = monthly_plot.sort_values(
+                ["_year", "_month"]
+            ).tail(12)
+
+        elif period == "令和8年度":
+
+            monthly_plot = monthly_plot[
+                (
+                    (monthly_plot["_year"] == 8)
+                    &
+                    (monthly_plot["_month"] >= 4)
+                )
+                |
+                (
+                    (monthly_plot["_year"] == 9)
+                    &
+                    (monthly_plot["_month"] <= 3)
+                )
+            ]
+
+        elif period == "令和7年度":
+
+            monthly_plot = monthly_plot[
+                (
+                    (monthly_plot["_year"] == 7)
+                    &
+                    (monthly_plot["_month"] >= 4)
+                )
+                |
+                (
+                    (monthly_plot["_year"] == 8)
+                    &
+                    (monthly_plot["_month"] <= 3)
+                )
+            ]
+
+        elif period == "令和6年度":
+
+            monthly_plot = monthly_plot[
+                (
+                    (monthly_plot["_year"] == 6)
+                    &
+                    (monthly_plot["_month"] >= 4)
+                )
+                |
+                (
+                    (monthly_plot["_year"] == 7)
+                    &
+                    (monthly_plot["_month"] <= 3)
+                )
+            ]
+
+        monthly_plot = monthly_plot.sort_values(
+            ["_year", "_month"]
+        )
+
         if len(monthly_plot) > 0:
 
             if "月" in monthly_plot.columns:
 
-                monthly_plot = monthly_plot.sort_values("月")
+
 
                 target_cols = []
 
@@ -417,15 +710,36 @@ with st.expander("📈 月次推移を見る"):
                         y="人数",
                         color="指標",
                         markers=True,
-                        height=400
+                        height=400,
+                        color_discrete_map={
+                            "待機人数": "#1f77b4",
+                            "受入可能数": "#6ec1ff",
+                            "入所児童数": "#ff4b4b"
+                        },
                     )
 
+                    tick_vals = monthly_plot["月"][::3]
+
                     trend_fig.update_layout(
+                        
+                        height=320,
                         margin=dict(
                             l=10,
                             r=10,
                             t=10,
-                            b=10
+                            b=120
+                        ),
+                        legend=dict(
+                            orientation="v",
+                            yanchor="top",
+                            y=-0.35,
+                            xanchor="center",
+                            x=0.5,
+                            font=dict(size=10)
+                        ),
+                        xaxis=dict(
+                            tickmode="array",
+                            tickvals=tick_vals
                         )
                     )
 
@@ -434,46 +748,94 @@ with st.expander("📈 月次推移を見る"):
                         use_container_width=True,
                         config={
                             "displayModeBar": False,
-                            "scrollZoom": True
+                            "staticPlot": True
                         }
                     )
+
 
 # =====================================
 # vacancy
 # =====================================
 
-st.subheader("🟡 最新データで空き枠がある園")
+st.subheader("🟡 直近で募集実績がある園")
 
-vacancy_df = nursery_df[
-    (nursery_df["区"] == ward)
-    &
-    (nursery_df["年齢"] == age)
-    &
-    (nursery_df["受入可能数"] > 0)
+vacancy_rows = []
+
+target_monthly = monthly_df[
+    (monthly_df["年齢"] == age)
 ].copy()
 
-vacancy_df = vacancy_df.sort_values(
-    "受入可能数",
-    ascending=False
-)
+for nursery_name in sorted(
+    target_monthly["園名"].dropna().unique()
+):
+
+    tmp = target_monthly[
+        target_monthly["園名"] == nursery_name
+    ].copy()
+
+    if len(tmp) == 0:
+        continue
+
+    def parse_month(v):
+
+        try:
+            parts = str(v).split(".")
+            y = int(parts[0].replace("R",""))
+            m = int(parts[1])
+            return y * 100 + m
+        except:
+            return -1
+
+    tmp["_sort"] = tmp["月"].apply(parse_month)
+
+    latest = tmp.sort_values("_sort").tail(1)
+
+    latest_accept = float(
+        latest["受入可能数"].iloc[0]
+    )
+
+    if latest_accept <= 0:
+        continue
+
+    vacancy_rows.append({
+        "園名": nursery_name,
+        "最新受入枠": round(latest_accept,1),
+        "平均受入枠": round(
+            tmp["受入可能数"].mean(),
+            1
+        ),
+        "最新待機": round(
+            float(latest["待機人数"].iloc[0]),
+            1
+        ),
+        "平均待機": round(
+            tmp["待機人数"].mean(),
+            1
+        ),
+        "通過率": round(
+            tmp["通過率"].mean(),
+            3
+        )
+    })
+
+vacancy_df = pd.DataFrame(vacancy_rows)
 
 if len(vacancy_df) > 0:
 
+    vacancy_df = vacancy_df.sort_values(
+        ["最新受入枠","平均受入枠"],
+        ascending=False
+    )
+
     st.dataframe(
-
-        vacancy_df[[
-            "園名",
-            "受入可能数",
-            "待機人数",
-            "通過率"
-        ]],
-
-        use_container_width=True
-
+        vacancy_df,
+        use_container_width=True,
+        hide_index=True
     )
 
 # =====================================
 # easy
+
 # =====================================
 
 st.subheader("🟢 比較的入りやすい園")

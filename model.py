@@ -42,7 +42,8 @@ def calc_user_score(
     saturday_work,
     night_shift,
     six_day_work,
-    self_employed
+    self_employed,
+    income
 
 ):
 
@@ -158,38 +159,23 @@ def calc_user_score(
     )
 
     
-    # =================================
-    # 年収補正
-    #
-    # 横浜では低年収が
-    # やや有利傾向
-    # =================================
+    
+    income_adjust = {
 
-    income_bias = np.random.choice(
+        "〜400万": 2,
+        "400〜600万": 1,
+        "600〜800万": 0,
+        "800〜1000万": -1,
+        "1000万〜": -2
 
-        [
+    }
 
-            -3,
-            -1,
-            0,
-            1,
-            2
-
-        ],
-
-        p=[
-
-            0.10,
-            0.20,
-            0.40,
-            0.20,
-            0.10
-
-        ]
-
+    income_bias = income_adjust.get(
+        income,
+        0
     )
 
-    # =================================
+# =================================
     # ランダムノイズ
     #
     # 実際の横浜保活では
@@ -388,6 +374,23 @@ def simulate_population(
             np.random.rand() < 0.07
         )
 
+        income = np.random.choice(
+            [
+                "〜400万",
+                "400〜600万",
+                "600〜800万",
+                "800〜1000万",
+                "1000万〜"
+            ],
+            p=[
+                0.15,
+                0.30,
+                0.30,
+                0.15,
+                0.10
+            ]
+        )
+
         # =============================
         # score
         # =============================
@@ -406,7 +409,8 @@ def simulate_population(
             saturday_work,
             night_shift,
             six_day_work,
-            self_employed
+            self_employed,
+            income
 
         )
 
@@ -482,8 +486,17 @@ def get_pass_probability(
     # probability
     # =================================
 
-    pass_prob = np.mean(
-        scores <= user_score
+    # =================================
+    # あなたのスコアと
+    # 必要ラインとの差から通過率推定
+    # =================================
+
+    score_gap = user_score - threshold
+
+    pass_prob = 1 / (
+        1 + np.exp(
+            -score_gap / 4
+        )
     )
 
     # =================================
