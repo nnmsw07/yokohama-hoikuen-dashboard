@@ -77,6 +77,18 @@ age = st.sidebar.selectbox(
     ["0歳", "1歳", "2歳", "3歳", "4歳", "5歳"]
 )
 
+admission_season = st.sidebar.selectbox(
+    "入園時期",
+    [
+        "通年",
+        "🌸4月",
+        "🌱5-6月",
+        "☀️7-9月",
+        "🍂10-12月",
+        "❄️1-3月"
+    ]
+)
+
 search_text = st.sidebar.text_input(
     "保育園名で検索",
     placeholder="例: スターチャイルド"
@@ -231,6 +243,60 @@ if nursery != "指定なし":
             nursery_row["通過率"]
         )
 
+        if admission_season != "通年":
+
+            season_map = {
+                "🌸4月": [4],
+                "🌱5-6月": [5, 6],
+                "☀️7-9月": [7, 8, 9],
+                "🍂10-12月": [10, 11, 12],
+                "❄️1-3月": [1, 2, 3],
+            }
+
+            season_df = monthly_df[
+                (monthly_df["園名"] == nursery)
+                &
+                (monthly_df["年齢"] == age)
+            ].copy()
+
+            def _get_month(v):
+                try:
+                    return int(str(v).split(".")[1])
+                except:
+                    return None
+
+            season_df["_month"] = (
+                season_df["月"].apply(_get_month)
+            )
+
+            season_df = season_df[
+                season_df["_month"].isin(
+                    season_map[admission_season]
+                )
+            ]
+
+            if len(season_df) > 0:
+
+                accepted = float(
+                    season_df["受入可能数"]
+                    .fillna(0)
+                    .mean()
+                )
+
+                waiting = float(
+                    season_df["待機人数"]
+                    .fillna(0)
+                    .mean()
+                )
+
+                pass_ratio_actual = (
+                    accepted /
+                    max(
+                        accepted + waiting,
+                        1
+                    )
+                )
+
 # =====================================
 # simulation
 # =====================================
@@ -273,7 +339,9 @@ threshold_hensachi = (
 # current target
 # =====================================
 
-target_text = f"📍 {ward} / {age}"
+target_text = (
+    f"📍 {ward} / {age} / {admission_season}"
+)
 
 if nursery != "指定なし":
     target_text += f"　🏫 {nursery}"
@@ -285,6 +353,11 @@ st.info(target_text)
 # =====================================
 
 st.markdown("### 📊 診断結果")
+
+if admission_season != "通年":
+    st.caption(
+        f"{admission_season}の募集実績をもとに難易度を推定しています"
+    )
 
 st.markdown(f"""
 <div style="
@@ -577,9 +650,6 @@ st.plotly_chart(
 
 with st.expander("📈 月次推移を見る"):
 
-    st.caption(
-        "※ スマホでは横スクロールできます"
-    )
 
     if nursery != "指定なし":
 
