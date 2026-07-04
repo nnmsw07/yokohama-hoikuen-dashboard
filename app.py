@@ -51,7 +51,7 @@ st.markdown("## 👶 横浜保活診断")
 
 st.caption("横浜市公開データをもとに保育園難易度を分析")
 
-st.info("👈 左上の「>」を押すと条件入力できます")
+st.info("👈 左上の「>>」を押して条件入力すると、診断を開始できます")
 
 # =====================================
 # load
@@ -211,10 +211,196 @@ ward_score = float(
 # =====================================
 
 nursery_score = ward_score
-accepted = 100
-waiting = 100
-pass_ratio_actual = 0.5
 
+ward_nursery_df = nursery_df[
+    (nursery_df["区"] == ward)
+    &
+    (nursery_df["年齢"] == age)
+].copy()
+
+ward_nursery_names = (
+    ward_nursery_df["園名"]
+    .dropna()
+    .unique()
+    .tolist()
+)
+
+# 区だけ指定した場合の通年初期値
+# 区内の園の受入可能数・待機人数を合算する
+if len(ward_nursery_df) > 0:
+
+    accepted = float(
+        ward_nursery_df["受入可能数"]
+        .fillna(0)
+        .sum()
+    )
+
+    waiting = float(
+        ward_nursery_df["待機人数"]
+        .fillna(0)
+        .sum()
+    )
+
+    pass_ratio_actual = (
+        accepted /
+        max(
+            accepted + waiting,
+            1
+        )
+    )
+
+else:
+
+    accepted = 100
+    waiting = 100
+    pass_ratio_actual = 0.5
+
+
+season_map = {
+    "🌸4月": [4],
+    "🌱5-6月": [5, 6],
+    "☀️7-9月": [7, 8, 9],
+    "🍂10-12月": [10, 11, 12],
+    "❄️1-3月": [1, 2, 3],
+}
+
+
+def _get_month(v):
+
+    try:
+        return int(str(v).split(".")[1])
+    except:
+        return None
+
+
+def _aggregate_monthly_metrics(target_nursery, target_season):
+
+    # 園指定あり：その園だけ
+    if target_nursery != "指定なし":
+
+        base_df = monthly_df[
+            (monthly_df["園名"] == target_nursery)
+            &
+            (monthly_df["年齢"] == age)
+        ].copy()
+
+    # 園指定なし：選択中の区にある園をまとめる
+    else:
+
+        base_df = monthly_df[
+            (monthly_df["園名"].isin(ward_nursery_names))
+            &
+            (monthly_df["年齢"] == age)
+        ].copy()
+
+    if len(base_df) == 0:
+        return None
+
+    base_df["_month"] = (
+        base_df["月"].apply(_get_month)
+    )
+
+    if target_season != "通年":
+
+        base_df = base_df[
+            base_df["_month"].isin(
+                season_map[target_season]
+            )
+        ]
+
+    if len(base_df) == 0:
+        return None
+
+    # 区だけ指定の場合は、月ごとに区内全園を合算してから平均する
+    if target_nursery == "指定なし":
+
+        monthly_sum = (
+            base_df
+            .groupby("月", as_index=False)[
+                [
+                    "受入可能数",
+                    "待機人数"
+                ]
+            ]
+            .sum()
+        )
+
+        accepted_avg = float(
+            monthly_sum["受入可能数"]
+            .fillna(0)
+            .mean()
+        )
+
+        waiting_avg = float(
+            monthly_sum["待機人数"]
+            .fillna(0)
+            .mean()
+        )
+
+        recruit_months = int(
+            monthly_sum["受入可能数"]
+            .fillna(0)
+            .gt(0)
+            .sum()
+        )
+
+        observed_months = int(
+            len(monthly_sum)
+        )
+
+    # 園指定ありの場合は、その園の月次データを平均する
+    else:
+
+        accepted_avg = float(
+            base_df["受入可能数"]
+            .fillna(0)
+            .mean()
+        )
+
+        waiting_avg = float(
+            base_df["待機人数"]
+            .fillna(0)
+            .mean()
+        )
+
+        recruit_months = int(
+            base_df["受入可能数"]
+            .fillna(0)
+            .gt(0)
+            .sum()
+        )
+
+        observed_months = int(
+            len(base_df)
+        )
+
+    vacancy_rate = (
+        recruit_months /
+        max(
+            observed_months,
+            1
+        )
+    )
+
+    pass_ratio_actual_tmp = (
+        accepted_avg /
+        max(
+            accepted_avg + waiting_avg,
+            1
+        )
+    )
+
+    return {
+        "accepted_avg": accepted_avg,
+        "waiting_avg": waiting_avg,
+        "pass_ratio_actual": pass_ratio_actual_tmp,
+        "recruit_months": recruit_months,
+        "observed_months": observed_months,
+        "vacancy_rate": vacancy_rate,
+    }
+
+
+# 園指定ありの場合は、まず園単体の通年データを使う
 if nursery != "指定なし":
 
     nursery_row = nursery_df[
@@ -243,59 +429,23 @@ if nursery != "指定なし":
             nursery_row["通過率"]
         )
 
-        if admission_season != "通年":
 
-            season_map = {
-                "🌸4月": [4],
-                "🌱5-6月": [5, 6],
-                "☀️7-9月": [7, 8, 9],
-                "🍂10-12月": [10, 11, 12],
-                "❄️1-3月": [1, 2, 3],
-            }
+# 入園時期が通年以外なら、
+# 園指定ありでも区のみ指定でも、月次データから季節別に上書きする
+if admission_season != "通年":
 
-            season_df = monthly_df[
-                (monthly_df["園名"] == nursery)
-                &
-                (monthly_df["年齢"] == age)
-            ].copy()
+    selected_season_metrics = _aggregate_monthly_metrics(
+        nursery,
+        admission_season
+    )
 
-            def _get_month(v):
-                try:
-                    return int(str(v).split(".")[1])
-                except:
-                    return None
+    if selected_season_metrics is not None:
 
-            season_df["_month"] = (
-                season_df["月"].apply(_get_month)
-            )
-
-            season_df = season_df[
-                season_df["_month"].isin(
-                    season_map[admission_season]
-                )
-            ]
-
-            if len(season_df) > 0:
-
-                accepted = float(
-                    season_df["受入可能数"]
-                    .fillna(0)
-                    .mean()
-                )
-
-                waiting = float(
-                    season_df["待機人数"]
-                    .fillna(0)
-                    .mean()
-                )
-
-                pass_ratio_actual = (
-                    accepted /
-                    max(
-                        accepted + waiting,
-                        1
-                    )
-                )
+        accepted = selected_season_metrics["accepted_avg"]
+        waiting = selected_season_metrics["waiting_avg"]
+        pass_ratio_actual = selected_season_metrics[
+            "pass_ratio_actual"
+        ]
 
 # =====================================
 # simulation
@@ -347,6 +497,43 @@ if nursery != "指定なし":
     target_text += f"　🏫 {nursery}"
 
 st.info(target_text)
+
+# =====================================
+# assumption note
+# =====================================
+
+if nursery == "指定なし":
+
+    st.caption(
+        "※ 保育園を指定しない場合は、選択した区内で複数の園を申請した場合の"
+        "平均的な目安として推定しています。"
+        "この診断では、現実的な申請数の目安として5〜8園程度を想定しています。"
+        "1園だけに絞る場合や、人気園だけを希望する場合は、実際の通過率が低くなる可能性があります。"
+    )
+
+else:
+
+    st.caption(
+        "※ 保育園を指定した場合は、その園の過去データをもとに、"
+        "必要偏差値と推定通過率を計算しています。"
+    )
+
+with st.expander("推定の前提について"):
+
+    st.markdown(
+        """
+- **保育園を指定しない場合**
+  選択した区内で、複数の園を申請した場合の平均的な目安として推定しています。
+
+- **想定している申請数**
+  現実的な保活の目安として、**5〜8園程度**の申請を想定しています。
+
+- **注意点**
+  実際の結果は、申請する園の組み合わせ、希望順位、兄弟加点、同点調整、年度ごとの募集状況によって変わります。
+  特に、1園だけに絞る場合や人気園中心で申請する場合は、表示より厳しくなる可能性があります。
+        """
+    )
+
 
 # =====================================
 # result
@@ -445,64 +632,44 @@ margin-top:2px;
 # admission timing
 # =====================================
 
-timing_rates = {}
+season_results = {}
 
-if nursery != "指定なし":
+for label in season_map.keys():
 
-    timing_df = monthly_df[
-        (monthly_df["園名"] == nursery)
-        &
-        (monthly_df["年齢"] == age)
-    ].copy()
+    metrics = _aggregate_monthly_metrics(
+        nursery,
+        label
+    )
 
-    if len(timing_df) > 0:
+    if metrics is None:
+        continue
 
-        def get_month(v):
-
-            try:
-                return int(str(v).split(".")[1])
-            except:
-                return None
-
-        timing_df["_month"] = (
-            timing_df["月"].apply(get_month)
+    threshold_s, pass_prob_s, pass_ratio_s = (
+        get_pass_probability(
+            scores,
+            user_score,
+            metrics["accepted_avg"],
+            metrics["waiting_avg"],
+            income
         )
+    )
 
-        timing_map = {
-            "🌸4月": [4],
-            "🌱5-6月": [5, 6],
-            "☀️7-9月": [7, 8, 9],
-            "🍂10-12月": [10, 11, 12],
-            "❄️1-3月": [1, 2, 3],
-        }
+    threshold_hensachi_s = (
+        (
+            threshold_s - score_mean
+        )
+        / max(score_std, 0.01)
+    ) * 10 + 50
 
-        for label, months in timing_map.items():
-
-            tmp = timing_df[
-                timing_df["_month"].isin(months)
-            ]
-
-            if len(tmp) == 0:
-                continue
-
-            accepted_sum = (
-                tmp["受入可能数"]
-                .fillna(0)
-                .sum()
-            )
-
-            waiting_sum = (
-                tmp["待機人数"]
-                .fillna(0)
-                .sum()
-            )
-
-            season_base_rate = accepted_sum / max(
-                accepted_sum + waiting_sum,
-                1
-            )
-
-            timing_rates[label] = season_base_rate
+    season_results[label] = {
+        "threshold_hensachi": threshold_hensachi_s,
+        "pass_prob": pass_prob_s,
+        "accepted_avg": metrics["accepted_avg"],
+        "waiting_avg": metrics["waiting_avg"],
+        "recruit_months": metrics["recruit_months"],
+        "observed_months": metrics["observed_months"],
+        "vacancy_rate": metrics["vacancy_rate"],
+    }
 
 # =====================================
 # labels
@@ -521,28 +688,28 @@ if nursery != "指定なし":
 
 
 
-if len(timing_rates) > 0:
+if len(season_results) > 0:
 
-    st.markdown("### 🗓 入園時期別の募集傾向")
+    st.markdown("### 🗓 入園時期別のボーダー・推定通過率")
 
-    def rate_label(rate):
+    if nursery == "指定なし":
 
-        if rate >= 0.6:
-            return "🟢 募集が多い"
+        st.caption(
+            "※ 区内の園の月次データを合算し、入園時期ごとの必要偏差値と推定通過率を計算しています。"
+        )
 
-        elif rate >= 0.3:
-            return "🟡 やや多い"
+    else:
 
-        elif rate >= 0.15:
-            return "🟠 普通"
+        st.caption(
+            "※ 選択した園の月次データから、入園時期ごとの必要偏差値と推定通過率を計算しています。"
+        )
 
-        elif rate >= 0.05:
-            return "🔴 少ない"
+    st.caption(
+        "※ 空き枠発生率は、過去の月次データで受入可能数が1人以上あった月の割合です。"
+        "実際の入園を保証するものではありません。"
+    )
 
-        else:
-            return "⚫ ほぼなし"
-
-    items = list(timing_rates.items())
+    items = list(season_results.items())
 
     for i in range(0, len(items), 2):
 
@@ -553,7 +720,23 @@ if len(timing_rates) > 0:
             if i + j >= len(items):
                 continue
 
-            label, rate = items[i + j]
+            label, data = items[i + j]
+
+            is_selected = (
+                admission_season == label
+            )
+
+            border_color = (
+                "#38bdf8"
+                if is_selected
+                else "transparent"
+            )
+
+            badge = (
+                "選択中"
+                if is_selected
+                else ""
+            )
 
             with cols[j]:
 
@@ -561,35 +744,71 @@ if len(timing_rates) > 0:
                     f"""
 <div style="
 background:#0f172a;
+border:2px solid {border_color};
 padding:12px;
 border-radius:10px;
 text-align:center;
 margin-bottom:10px;
 ">
+
 <div style="
-font-size:16px;
+font-size:15px;
 font-weight:700;
 color:white;
-margin-bottom:6px;
+margin-bottom:4px;
 ">
-{label}
+{label} {badge}
 </div>
 
 <div style="
-font-size:14px;
+font-size:11px;
+color:#94a3b8;
+margin-bottom:2px;
+">
+推定必要偏差値
+</div>
+
+<div style="
+font-size:26px;
+font-weight:700;
+color:white;
+line-height:1.1;
+margin-bottom:8px;
+">
+{data['threshold_hensachi']:.1f}
+</div>
+
+<div style="
+font-size:11px;
+color:#94a3b8;
+margin-bottom:2px;
+">
+推定通過率
+</div>
+
+<div style="
+font-size:20px;
+font-weight:700;
+color:white;
+line-height:1.1;
+margin-bottom:8px;
+">
+{data['pass_prob'] * 100:.0f}%
+</div>
+
+<div style="
+font-size:11px;
 color:#cbd5e1;
-margin-bottom:6px;
+line-height:1.5;
 ">
-{rate_label(rate)}
+平均受入 {data['accepted_avg']:.1f}人 /
+平均待機 {data['waiting_avg']:.1f}人<br>
+空き枠発生率 {data['vacancy_rate'] * 100:.0f}%<br>
+<span style="font-size:10px;color:#94a3b8;">
+過去{data['observed_months']}か月中{data['recruit_months']}か月で空きあり
+</span>
 </div>
 
-<div style="
-font-size:22px;
-font-weight:700;
-color:white;
-">
-{rate:.0%}
-</div>
 </div>
 """,
                     unsafe_allow_html=True
@@ -791,7 +1010,7 @@ with st.expander("📈 月次推移を見る"):
                     tick_vals = monthly_plot["月"][::3]
 
                     trend_fig.update_layout(
-                        
+                    
                         height=320,
                         margin=dict(
                             l=10,
@@ -821,116 +1040,3 @@ with st.expander("📈 月次推移を見る"):
                             "staticPlot": True
                         }
                     )
-
-
-# =====================================
-# vacancy
-# =====================================
-
-st.subheader("🟡 直近で募集実績がある園")
-
-vacancy_rows = []
-
-target_monthly = monthly_df[
-    (monthly_df["年齢"] == age)
-].copy()
-
-for nursery_name in sorted(
-    target_monthly["園名"].dropna().unique()
-):
-
-    tmp = target_monthly[
-        target_monthly["園名"] == nursery_name
-    ].copy()
-
-    if len(tmp) == 0:
-        continue
-
-    def parse_month(v):
-
-        try:
-            parts = str(v).split(".")
-            y = int(parts[0].replace("R",""))
-            m = int(parts[1])
-            return y * 100 + m
-        except:
-            return -1
-
-    tmp["_sort"] = tmp["月"].apply(parse_month)
-
-    latest = tmp.sort_values("_sort").tail(1)
-
-    latest_accept = float(
-        latest["受入可能数"].iloc[0]
-    )
-
-    if latest_accept <= 0:
-        continue
-
-    vacancy_rows.append({
-        "園名": nursery_name,
-        "最新受入枠": round(latest_accept,1),
-        "平均受入枠": round(
-            tmp["受入可能数"].mean(),
-            1
-        ),
-        "最新待機": round(
-            float(latest["待機人数"].iloc[0]),
-            1
-        ),
-        "平均待機": round(
-            tmp["待機人数"].mean(),
-            1
-        ),
-        "通過率": round(
-            tmp["通過率"].mean(),
-            3
-        )
-    })
-
-vacancy_df = pd.DataFrame(vacancy_rows)
-
-if len(vacancy_df) > 0:
-
-    vacancy_df = vacancy_df.sort_values(
-        ["最新受入枠","平均受入枠"],
-        ascending=False
-    )
-
-    st.dataframe(
-        vacancy_df,
-        use_container_width=True,
-        hide_index=True
-    )
-
-# =====================================
-# easy
-
-# =====================================
-
-st.subheader("🟢 比較的入りやすい園")
-
-recommend_df = nursery_df[
-    (nursery_df["区"] == ward)
-    &
-    (nursery_df["年齢"] == age)
-].copy()
-
-recommend_df = recommend_df.sort_values(
-    ["難易度スコア", "通過率"],
-    ascending=[True, False]
-)
-
-recommend_df = recommend_df[[
-    "園名",
-    "難易度スコア",
-    "通過率",
-    "待機人数",
-    "受入可能数"
-]].head(10)
-
-st.dataframe(
-    recommend_df,
-    use_container_width=True
-)
-
